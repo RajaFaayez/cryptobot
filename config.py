@@ -9,7 +9,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 #  Alert settings
 # ─────────────────────────────────────────────
 CHECK_INTERVAL = 60      # seconds between each price check
-PUMP_THRESHOLD = 2.0     # minimum % change to trigger an alert
+PUMP_THRESHOLD = 1.0     # minimum % change to trigger an alert
 
 # ─────────────────────────────────────────────
 #  Sectors → Binance base-asset symbols (no USDT suffix)
