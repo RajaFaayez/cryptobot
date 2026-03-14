@@ -8,7 +8,7 @@ from datetime import datetime
 from config import DISCORD_TOKEN, SECTORS, CHECK_INTERVAL, PUMP_THRESHOLD
 
 intents = discord.Intents.default()
-intents.message_content = True   # requires "Message Content Intent" in Dev Portal → Bot tab
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -246,6 +246,130 @@ async def price_cmd(ctx, coin: str):
         await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send(f"❌ Error fetching price: {e}")
+
+@bot.command(name="summary")
+async def summary(ctx, hours: int = 8):
+    """Show price summary for all sectors. Usage: !summary  OR  !summary 4"""
+    await ctx.send(f"⏳ Fetching data for all sectors over last `{hours}h`... this may take a few seconds.")
+
+    try:
+        # Fetch all 24h ticker data in one call
+        async with aiohttp.ClientSession() as session:
+            async with session.get(BINANCE_24H_URL) as r:
+                all_tickers = await r.json()
+
+        # Build lookup: symbol -> ticker data
+        ticker_map = {t["symbol"]: t for t in all_tickers if t["symbol"].endswith("USDT")}
+
+        for sector, coins in SECTORS.items():
+            lines = []
+            results = []
+
+            for coin in coins:
+                symbol = f"{coin}USDT"
+                t = ticker_map.get(symbol)
+                if not t:
+                    continue
+
+                price      = float(t["lastPrice"])
+                change_24h = float(t["priceChangePercent"])
+                high_24h   = float(t["highPrice"])
+                low_24h    = float(t["lowPrice"])
+
+                # Approximate `hours` change using high/low range as proxy
+                # For true Nth-hour data we'd need klines; use 24h scaled as estimate
+                scale      = hours / 24
+                approx_chg = change_24h * scale
+
+                arrow = "🟢" if approx_chg >= 0 else "🔴"
+                results.append((abs(approx_chg), arrow, coin, price, approx_chg, change_24h))
+
+            if not results:
+                continue
+
+            # Sort by biggest mover first
+            results.sort(reverse=True)
+
+            # Build compact table
+            lines.append(f"```")
+            lines.append(f"{'COIN':<8} {'PRICE':>12} {f'~{hours}h Δ':>8} {'24h Δ':>8}")
+            lines.append(f"{'─'*8} {'─'*12} {'─'*8} {'─'*8}")
+            for _, arrow, coin, price, chg_h, chg_24 in results:
+                price_str = f"${price:.4f}" if price < 1 else f"${price:.2f}"
+                lines.append(f"{coin:<8} {price_str:>12} {chg_h:>+7.2f}% {chg_24:>+7.2f}%")
+            lines.append(f"```")
+
+            embed = discord.Embed(
+                title=f"{sector.upper()} Sector — Last {hours}h Snapshot",
+                description="\n".join(lines),
+                color=0x00AAFF,
+                timestamp=datetime.utcnow(),
+            )
+            embed.set_footer(text=f"CryptoPump Bot • Binance • Sorted by biggest mover")
+            await ctx.send(embed=embed)
+            await asyncio.sleep(0.5)  # avoid rate limit
+
+    except Exception as e:
+        await ctx.send(f"❌ Error fetching summary: {e}")
+
+
+@bot.command(name="top")
+async def top_movers(ctx, hours: int = 8):
+    """Show top 10 biggest movers across ALL sectors. Usage: !top  OR  !top 4"""
+    await ctx.send(f"⏳ Finding top movers across all sectors in last `{hours}h`...")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(BINANCE_24H_URL) as r:
+                all_tickers = await r.json()
+
+        ticker_map = {t["symbol"]: t for t in all_tickers if t["symbol"].endswith("USDT")}
+
+        all_results = []
+        for sector, coins in SECTORS.items():
+            for coin in coins:
+                symbol = f"{coin}USDT"
+                t = ticker_map.get(symbol)
+                if not t:
+                    continue
+                change_24h = float(t["priceChangePercent"])
+                approx_chg = change_24h * (hours / 24)
+                price      = float(t["lastPrice"])
+                all_results.append((abs(approx_chg), approx_chg, coin, sector, price, change_24h))
+
+        all_results.sort(reverse=True)
+        top     = all_results[:10]
+        bottom  = sorted(all_results, key=lambda x: x[1])[:5]
+
+        lines = ["```"]
+        lines.append(f"🚀 TOP PUMPS — Last ~{hours}h")
+        lines.append(f"{'COIN':<8} {'SECTOR':<10} {'PRICE':>10} {f'~{hours}h':>8} {'24h':>8}")
+        lines.append("─" * 48)
+        for _, chg_h, coin, sector, price, chg_24 in top:
+            price_str = f"${price:.4f}" if price < 1 else f"${price:.2f}"
+            lines.append(f"{coin:<8} {sector:<10} {price_str:>10} {chg_h:>+7.2f}% {chg_24:>+7.2f}%")
+
+        lines.append("")
+        lines.append(f"📉 TOP DUMPS — Last ~{hours}h")
+        lines.append(f"{'COIN':<8} {'SECTOR':<10} {'PRICE':>10} {f'~{hours}h':>8} {'24h':>8}")
+        lines.append("─" * 48)
+        for _, chg_h, coin, sector, price, chg_24 in bottom:
+            price_str = f"${price:.4f}" if price < 1 else f"${price:.2f}"
+            lines.append(f"{coin:<8} {sector:<10} {price_str:>10} {chg_h:>+7.2f}% {chg_24:>+7.2f}%")
+        lines.append("```")
+
+        embed = discord.Embed(
+            title=f"📊 Top Movers Across All Sectors",
+            description="\n".join(lines),
+            color=0xFFAA00,
+            timestamp=datetime.utcnow(),
+        )
+        embed.set_footer(text="CryptoPump Bot • Binance • ~estimate based on 24h data")
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 
 @bot.command(name="addcoin")
 @commands.has_permissions(administrator=True)
