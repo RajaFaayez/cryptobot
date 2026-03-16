@@ -1,11 +1,13 @@
 import discord
 from discord.ext import commands, tasks
 import aiohttp
+from aiohttp import web
 import asyncio
 import json
 import os
 from datetime import datetime, timezone
 from collections import defaultdict
+
 from config import (
     DISCORD_TOKEN, SECTORS, CHECK_INTERVAL,
     PUMP_THRESHOLD, VOLUME_SPIKE_MULTIPLIER,
@@ -474,6 +476,22 @@ def _save_sectors():
     with open("sectors_custom.json", "w") as f:
         json.dump(SECTORS, f, indent=2)
 
+# ── keep-alive web server (prevents Railway from sleeping) ────────────────────
+
+async def health_handler(request):
+    return web.Response(text="CryptoPump Bot alive", status=200)
+
+async def run_web_server():
+    port = int(os.getenv("PORT", 8080))
+    app  = web.Application()
+    app.router.add_get("/", health_handler)
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server running on port {port}")
+
 # ── startup ───────────────────────────────────────────────────────────────────
 
 @bot.event
@@ -485,4 +503,8 @@ async def on_ready():
           f"Cumulative={CUMULATIVE_THRESHOLD}%/{CUMULATIVE_WINDOW_MINUTES}min | "
           f"VolSpike={VOLUME_SPIKE_MULTIPLIER}x | Cooldown={COOLDOWN_MINUTES}min")
 
-bot.run(DISCORD_TOKEN)
+async def main():
+    await run_web_server()
+    await bot.start(DISCORD_TOKEN)
+
+asyncio.run(main())
