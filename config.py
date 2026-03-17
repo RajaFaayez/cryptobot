@@ -78,3 +78,11 @@ SECTORS = {
         "KMNO",
     ],
 }
+
+# ─────────────────────────────────────────────
+#  Sector Contagion settings
+# ─────────────────────────────────────────────
+# A coin must pump at least this % in one check to trigger a contagion alert
+CONTAGION_THRESHOLD      = 2.0   # % single-candle pump to fire contagion
+# How far back to look when counting sector pump momentum
+CONTAGION_WINDOW_MINUTES = 30    # minutes
