@@ -86,3 +86,4 @@ SECTORS = {
 CONTAGION_THRESHOLD      = 2.0   # % single-candle pump to fire contagion
 # How far back to look when counting sector pump momentum
 CONTAGION_WINDOW_MINUTES = 30    # minutes
+CONTAGION_COOLDOWN_MINUTES = 15  # min gap between contagion alerts for same sector

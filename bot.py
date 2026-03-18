@@ -13,7 +13,7 @@ from config import (
     PUMP_THRESHOLD, VOLUME_SPIKE_MULTIPLIER,
     COOLDOWN_MINUTES, MIN_VOLUME_USDT,
     CUMULATIVE_WINDOW_MINUTES, CUMULATIVE_THRESHOLD,
-    CONTAGION_THRESHOLD, CONTAGION_WINDOW_MINUTES,
+    CONTAGION_THRESHOLD, CONTAGION_WINDOW_MINUTES, CONTAGION_COOLDOWN_MINUTES,
 )
 
 intents = discord.Intents.default()
@@ -33,6 +33,8 @@ alert_channels = {}                  # channel_id -> [sectors]
 sector_pump_log = defaultdict(list)
 # symbol -> ts  — when we last sent a contagion suggestion for it
 contagion_sent  = {}
+# sector -> ts  — when we last sent a contagion alert for this sector
+sector_contagion_sent = {}
 
 BINANCE_24H_URL = "https://api.binance.com/api/v3/ticker/24hr"
 
@@ -276,9 +278,18 @@ async def check_pumps():
         if new_price == 0:
             continue
 
+        # Filter out known broken/glitchy coins
+        BLACKLIST = {"BTTCUSDT", "LUNCUSDT"}
+        if symbol in BLACKLIST:
+            continue
+
         per_min_vol = vol_quote / (24 * 60)
         if per_min_vol < MIN_VOLUME_USDT:
             price_cache[symbol] = new_price
+            continue
+        
+        # Filter coins whose price is so small it causes floating point noise
+        if new_price < 0.000001:
             continue
 
         # Price history
@@ -330,22 +341,30 @@ async def check_pumps():
         alerts_to_send.append((embed, sector, symbol, change_pct, change_pct > 0))
 
         # Record for contagion tracking (only pumps, not dumps)
+        # Works for ALL named sectors (not other)
         if change_pct > 0 and sector != "other":
             record_sector_pump(sector, symbol, change_pct)
 
         # ── contagion check ───────────────────────────────────────────────────
-        # Fire contagion alert if this pump is strong enough
-        if change_pct >= CONTAGION_THRESHOLD and sector != "other":
+        # Fire if: single candle >= threshold OR cumulative >= threshold
+        # Only for named sectors (needs peer coins to suggest)
+        effective_move = max(abs(change_pct), abs(cumulative) if cumulative else 0)
+        if effective_move >= CONTAGION_THRESHOLD and sector != "other" and change_pct > 0:
             recent_in_sector = len([
                 1 for t, s, c in sector_pump_log[sector]
                 if s != symbol
             ])
-            suggestions = get_contagion_suggestions(symbol, sector, ticker_map)
-            if suggestions:
-                c_embed = contagion_embed(
-                    symbol, change_pct, sector, suggestions, recent_in_sector
-                )
-                contagion_to_send.append((c_embed, sector, symbol, suggestions))
+            # Only send contagion if not sent one for this sector recently
+            last_sector_cong = sector_contagion_sent.get(sector, 0)
+            now_check = datetime.now(timezone.utc).timestamp()
+            if now_check - last_sector_cong >= CONTAGION_COOLDOWN_MINUTES * 60:
+                suggestions = get_contagion_suggestions(symbol, sector, ticker_map)
+                if suggestions:
+                    c_embed = contagion_embed(
+                        symbol, change_pct, sector, suggestions, recent_in_sector
+                    )
+                    contagion_to_send.append((c_embed, sector, symbol, suggestions))
+                    sector_contagion_sent[sector] = now_check
 
     # ── send alerts to subscribed channels ────────────────────────────────────
     for channel_id, watched in alert_channels.items():
