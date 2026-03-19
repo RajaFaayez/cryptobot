@@ -8,7 +8,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 # ─────────────────────────────────────────────
 #  Alert engine settings
 # ─────────────────────────────────────────────
-CHECK_INTERVAL           = 60     # seconds between price checks
+# CHECK_INTERVAL removed — bot now uses real-time WebSocket stream
 PUMP_THRESHOLD           = 1.0    # % move in one 60s window to alert
 CUMULATIVE_THRESHOLD     = 5.0    # % move over CUMULATIVE_WINDOW_MINUTES to alert
 CUMULATIVE_WINDOW_MINUTES = 30    # how many minutes to track cumulative move
